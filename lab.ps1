@@ -20,6 +20,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$env:PYTHONUTF8 = '1'
 Set-Location $PSScriptRoot
 
 $VenvPy = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
@@ -45,7 +46,7 @@ function Locust {
 switch ($Target) {
     'help' {
         Write-Host ""
-        Write-Host "Day 20 lab — Windows runner" -ForegroundColor Cyan
+        Write-Host "Day 20 lab - Windows runner" -ForegroundColor Cyan
         Write-Host "Usage:  .\lab.ps1 <target>"
         Write-Host ""
         Write-Host "Setup (00)"
@@ -120,6 +121,40 @@ switch ($Target) {
     'semantic-cache-offline' { Py bonus\serving-regimes\semantic-cache-demo.py --offline --sweep }
 
     'build-llama' {
+        # A fresh Visual Studio Build Tools install is not visible to an existing
+        # PowerShell process. Import its developer environment when available.
+        $vcvars = 'C:\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+        if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue) -and (Test-Path $vcvars)) {
+            cmd.exe /d /s /c "`"$vcvars`" && set" | ForEach-Object {
+                if ($_ -match '^([^=]+)=(.*)$') {
+                    if ($matches[1] -ieq 'Path') {
+                        # The host process can contain both PATH and Path. The
+                        # PowerShell env provider cannot enumerate that state,
+                        # and MSBuild rejects the duplicate case-insensitive key.
+                        # Remove every spelling through the .NET process API,
+                        # then restore exactly one canonical Path entry.
+                        $pathKeys = @(
+                            [Environment]::GetEnvironmentVariables('Process').Keys |
+                                Where-Object { $_ -ieq 'Path' }
+                        )
+                        foreach ($pathKey in $pathKeys) {
+                            [Environment]::SetEnvironmentVariable(
+                                [string]$pathKey, $null, 'Process'
+                            )
+                        }
+                        [Environment]::SetEnvironmentVariable(
+                            'Path', $matches[2], 'Process'
+                        )
+                    } else {
+                        Set-Item -Path "Env:$($matches[1])" -Value $matches[2]
+                    }
+                }
+            }
+        }
+        $vsCmake = 'C:\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin'
+        if (-not (Get-Command cmake.exe -ErrorAction SilentlyContinue) -and (Test-Path $vsCmake)) {
+            $env:PATH = "$vsCmake;$env:PATH"
+        }
         foreach ($t in 'cmake', 'git') {
             if (-not (Get-Command $t -ErrorAction SilentlyContinue)) {
                 Write-Host "ERROR: $t not found. Install Visual Studio Build Tools + cmake + git." -ForegroundColor Red
@@ -132,7 +167,12 @@ switch ($Target) {
         }
         $flags = if ($env:LLAMA_CMAKE_FLAGS) { $env:LLAMA_CMAKE_FLAGS -split ' ' } else { @() }
         cmake -B bonus\llama.cpp\build -S bonus\llama.cpp @flags -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release
-        cmake --build bonus\llama.cpp\build -j --config Release
+        if ($LASTEXITCODE -ne 0) { throw "CMake configure failed (exit $LASTEXITCODE)." }
+        # Building every upstream target also builds the large web UI and an
+        # unlimited `-j` can exhaust a 16 GB Windows laptop. B1 only needs the
+        # benchmark binary, so keep the build bounded and reproducible.
+        cmake --build bonus\llama.cpp\build --target llama-bench -j 1 --config Release -- /nodeReuse:false
+        if ($LASTEXITCODE -ne 0) { throw "llama-bench build failed (exit $LASTEXITCODE)." }
         Write-Host ""
         Write-Host "Built. Now compare it against the prebuilt binary:  .\lab.ps1 compare-builds"
     }
