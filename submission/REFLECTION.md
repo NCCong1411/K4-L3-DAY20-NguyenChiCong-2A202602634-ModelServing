@@ -6,10 +6,10 @@
 >
 > `make verify` sẽ fail nếu còn placeholder chưa điền. Đó là cố ý.
 
-**Họ Tên:** _<Họ Tên>_
-**MSSV:** _<MSSV>_
+**Họ Tên:** _Nguyễn Chí Công_
+**MSSV:** _2A202602634_
 **Cohort:** _<A20-K1 / A20-K2 / ...>_
-**Ngày submit:** _<YYYY-MM-DD>_
+**Ngày submit:** _2026-10-06_
 
 ---
 
